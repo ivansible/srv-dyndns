@@ -1,0 +1,14 @@
+# ansible-managed
+
+[Unit]
+Description=dyndns
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+EnvironmentFile=/etc/default/dyndns
+ExecStart=/usr/local/sbin/dyndns service
+
+[Install]
+WantedBy=multi-user.target

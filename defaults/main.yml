@@ -1,3 +1,30 @@
 ---
 # defaults for ivansible.srv_dyndns
+
+srv_dyndns_enable: true
+
+srv_dyndns_cloudflare_email: ~
+srv_dyndns_cloudflare_token: ~
+srv_dyndns_domain: example.com
+
+srv_dyndns_internal_port: 35353
+srv_dyndns_web_path: /dyndns
+srv_dyndns_web_user: dyndns
+srv_dyndns_web_pass: supersecret
+
+srv_dyndns_poll_enable: false
+srv_dyndns_poll_interval: 3600
+
+srv_dyndns_main_proxy: socks5://127.0.0.1:1080
+srv_dyndns_main_host: myhost
+
+srv_dyndns_ssh_url: ssh-cli://admin:supersecret@127.0.0.1:22
+srv_dyndns_prefix_len: 0
+srv_dyndns_prefix_interface: ISP
+
+srv_dyndns_prefix_hosts:
+  host1: 2001:db8::1
+  host2: 2001:db8::2
+
+srv_dyndns_verbose: 2
 ...

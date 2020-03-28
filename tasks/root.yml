@@ -1,5 +1,77 @@
 ---
-- name: root task1
-  debug:
-    msg: task1
+- name: install python3 apt packages for dyndns
+  apt:
+    name:
+      - python3-requests
+      - python3-socks
+      - python3-paramiko
+      ## packages required by cloudflare
+      - python3-setuptools
+      - python3-pyasn1
+      - python3-yaml
+      ## packages required by paramiko for building pynacl
+      - libffi-dev
+      - libssl-dev
+  tags: srv_dyndns_install
+
+- name: install python3 pip requirements for dyndns
+  pip:
+    name:
+      - cloudflare
+      - pysocks > 1.6
+      - paramiko > 2.3
+    executable: pip3
+  register: dyndns_pip_result
+  until: dyndns_pip_result is successful
+  tags: srv_dyndns_install
+
+- name: install dyndns server executable
+  copy:
+    src: dyndns.py
+    dest: /usr/local/sbin/dyndns
+    force: true
+    mode: 0755
+  notify: restart dyndns service
+  tags: srv_dyndns_service
+
+- name: configure dyndns service
+  template:
+    src: dyndns.conf
+    dest: /etc/default/dyndns
+    mode: 0640
+  notify: restart dyndns service
+  tags:
+    - srv_dyndns_config
+    - srv_dyndns_service
+
+- name: setup dyndns systemd service
+  template:
+    src: dyndns.service
+    dest: /etc/systemd/system/dyndns.service
+    mode: 0644
+  register: dyndns_service_file
+  notify: restart dyndns service
+  tags: srv_dyndns_service
+
+- name: activate dyndns systemd service
+  systemd:
+    name: dyndns
+    state: started
+    enabled: true
+    daemon_reload: "{{ dyndns_service_file is changed }}"
+  tags: srv_dyndns_service
+
+- name: directory for nginx dyndns mixin
+  file:
+    path: /etc/nginx/mixin.d
+    state: directory
+  tags: srv_dyndns_nginx
+
+- name: configure nginx redirector for dyndns
+  template:
+    src: dyndns.nginx.conf
+    dest: /etc/nginx/mixin.d/dyndns.conf
+    mode: 0644
+  notify: reload nginx service
+  tags: srv_dyndns_nginx
 ...

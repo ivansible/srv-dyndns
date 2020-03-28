@@ -1,3 +1,11 @@
 ---
 # handlers for ivansible.srv_dyndns
+
+- name: restart dyndns service
+  systemd:
+    name: dyndns
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  become: true
 ...

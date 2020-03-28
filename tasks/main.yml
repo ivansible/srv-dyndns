@@ -1,6 +1,10 @@
 ---
-- name: become root and install role
+- name: become root and install dynamic dns service
   import_tasks: root.yml
   become: true
-  tags: role_all
+  tags: srv_dyndns_all
+  when: srv_dyndns_enable |bool
+
+- name: run postponed handlers now
+  meta: flush_handlers
 ...

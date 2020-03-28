@@ -1,5 +1,6 @@
 ---
-dependencies: []
+dependencies:
+  - ivansible.srv_cdn
 
 galaxy_info:
   role_name: srv_dyndns
@@ -17,7 +18,8 @@ galaxy_info:
 
   galaxy_tags:
     - linux
-    - ansible
+    - dns
+    - nginx
 
   github_branch: master
 ...
