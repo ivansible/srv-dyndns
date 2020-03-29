@@ -2,6 +2,13 @@
 
 [Unit]
 Description=dyndns
+After=network.target
+{% if ansible_lsb.codename == 'xenial' %}
+StartLimitInterval=180
+{% else %}
+StartLimitIntervalSec=180
+{% endif %}
+StartLimitBurst=6
 
 [Service]
 Type=simple
@@ -9,6 +16,9 @@ User=nobody
 Group=nogroup
 EnvironmentFile=/etc/default/dyndns
 ExecStart=/usr/local/sbin/dyndns service
+Restart=always
+RestartSec=20
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
