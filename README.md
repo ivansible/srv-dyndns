@@ -82,6 +82,15 @@ Listed prefixes can be further narrowed by length/interface filters.
 The first available (or passed by filters) prefix is used to update
 IPv6 addresses of prefix hosts.
 
+    srv_dyndns_service_user: ~
+If user is defined, dyndns service will run as this unix user.
+By default, service runs as user `nobody`.
+
+    srv_dyndns_ssh_keyfile: ~
+If keyfile is defined, the given ssh key will be installed in the `.ssh`
+subdirectory of the user home directory and the `keyfile=...` clause will
+be added in the ssh url.
+
     srv_dyndns_prefix_len: 0|64|56
 By default (or when this setting is zero) the first available IPv6 prefix is used.
 This setting allows to limit prefixes to those with given prefix length.
@@ -106,6 +115,7 @@ Verbosity level: 0 = no logging, 1 = only errors, 2 = normal messages, 3 = debug
 - `srv_dyndns_install` -- install required system packages
 - `srv_dyndns_config` -- create configuration files for dyndns
 - `srv_dyndns_service` -- setup systemd service for dyndns
+- `srv_dyndns_keyfile` -- install key file for ssh login
 - `srv_dyndns_nginx` -- setup nginx fronting
 - `srv_dyndns_all` -- all of the above
 

@@ -32,16 +32,49 @@
     force: true
     mode: 0755
   notify: restart dyndns service
-  tags: srv_dyndns_service
+  tags:
+    - srv_dyndns_install
+    - srv_dyndns_service
+
+- block:
+    - name: detect home directory of dyndns user
+      user:
+        name: "{{ srv_dyndns_service_user }}"
+      register: dyndns_user
+
+    - name: make directory for dyndns ssh key
+      file:
+        path: "{{ dyndns_user.home }}/.ssh"
+        state: directory
+        owner: "{{ dyndns_user.name }}"
+        group: "{{ dyndns_user.group }}"
+        mode: 0700
+
+    - name: install ssh key for dyndns login
+      copy:
+        src: "{{ srv_dyndns_ssh_keyfile }}"
+        dest: "{{ dyndns_user.home }}/.ssh/dyndns.key"
+        owner: "{{ dyndns_user.name }}"
+        group: "{{ dyndns_user.group }}"
+        mode: 0600
+      notify: restart dyndns service
+  when: srv_dyndns_service_user and srv_dyndns_ssh_keyfile
+  tags: srv_dyndns_keyfile
 
 - name: configure dyndns service
   template:
     src: dyndns.conf
     dest: /etc/default/dyndns
     mode: 0640
+  vars:
+    ssh_url: "{{ srv_dyndns_ssh_url |default('',true) }}"
+    got_keyfile: "{{ srv_dyndns_service_user and srv_dyndns_ssh_keyfile }}"
+    keyfile: "{{ '~/.ssh/dyndns.key' if got_keyfile else '' }}"
+    keyfile_sep: "{{ '&' if '?' in ssh_url else '?' }}"
   notify: restart dyndns service
   tags:
     - srv_dyndns_config
+    - srv_dyndns_keyfile
     - srv_dyndns_service
 
 - name: setup dyndns systemd service

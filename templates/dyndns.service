@@ -12,7 +12,7 @@ StartLimitBurst=6
 
 [Service]
 Type=simple
-User=nobody
+User={{ srv_dyndns_service_user |default('nobody', true) }}
 Group=nogroup
 EnvironmentFile=/etc/default/dyndns
 ExecStart=/usr/local/sbin/dyndns service
