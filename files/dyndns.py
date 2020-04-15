@@ -46,26 +46,30 @@ class DDNS(object):
         self.cf_dns = None
 
         mode = argv[1] if len(argv) == 2 else ''
-        if mode == 'update':
-            self.setup()
-            self.update_once()
-        elif mode == 'web':
-            self.setup()
-            self.web_server()
-        elif mode == 'poll':
-            self.setup()
-            self.poll_service()
-        elif mode == 'service':
-            self.is_service = True
-            self.setup()
-            poll_thread = threading.Thread(target=self.poll_service)
-            poll_thread.daemon = True
-            poll_thread.start()
-            self.web_server()
-        else:
-            program = os.path.basename(argv[0])
-            print('usage: %s service|web|poll|update' % program,
-                  file=sys.stderr)
+        try:
+            if mode == 'update':
+                self.setup()
+                self.update_once()
+            elif mode == 'web':
+                self.setup()
+                self.web_server()
+            elif mode == 'poll':
+                self.setup()
+                self.poll_service()
+            elif mode == 'service':
+                self.is_service = True
+                self.setup()
+                poll_thread = threading.Thread(target=self.poll_service)
+                poll_thread.daemon = True
+                poll_thread.start()
+                self.web_server()
+            else:
+                program = os.path.basename(argv[0])
+                print('usage: %s service|web|poll|update' % program,
+                      file=sys.stderr)
+                sys.exit(1)
+        except RuntimeError as ex:
+            print('exception: %s' % ex, file=sys.stderr)
             sys.exit(1)
 
     def web_server(self):
@@ -77,6 +81,8 @@ class DDNS(object):
             server.serve_forever()
         except KeyboardInterrupt:
             pass
+        except RuntimeError as ex:
+            self.error('exception: %s', ex)
         finally:
             server.server_close()
             self.web_active = False
@@ -103,9 +109,9 @@ class DDNS(object):
                     _thread.interrupt_main()
                 break
             except Exception as ex:
-                trace = traceback.format_exc()
                 self.error('exception: %s', ex)
-                if self.verbose >= 2:
+                if self.verbose >= 2 and not isinstance(ex, RuntimeError):
+                    trace = traceback.format_exc()
                     self.stdlog.write(trace)
                     self.stdlog.flush()
 
@@ -295,19 +301,28 @@ class DDNS(object):
                 self.fatal('invalid prefix hosts: %s', prefix_hosts)
 
         url = self.param('ssh_url', required=False)
+        if url:
+            self.ssh_conn = self.ssh_parse_url(url, self.SSH_METHODS.keys())
+            self.ssh_method = self.SSH_METHODS[self.ssh_conn['scheme']]
+        else:
+            self.ssh_conn = None
+            self.ssh_method = None
+
+    def ssh_parse_url(self, url, schemes=None):
         parsed_url = urlparse(url)
         query_args = parse_qs(parsed_url.query)
 
-        self.ssh_method = self.SSH_METHODS.get(parsed_url.scheme, '')
-        if not self.ssh_method:
-            if url:
-                self.fatal('ssh schema must be one of: %s',
-                           ' '.join(self.SSH_METHODS.keys()))
-            return
-        self.ssh_host = parsed_url.hostname
-        self.ssh_port = int(parsed_url.port or 22)
-        self.ssh_user = parsed_url.username
-        self.ssh_pass = parsed_url.password or None
+        if url and schemes and parsed_url.scheme not in schemes:
+            self.fatal('ssh schema must be one of: %s', ' '.join(schemes))
+
+        conn = {
+            'url': url,
+            'scheme': parsed_url.scheme,
+            'host': parsed_url.hostname,
+            'port': int(parsed_url.port or 22),
+            'user': parsed_url.username,
+            'pass': parsed_url.password or None,
+        }
 
         key_file = query_args.get('keyfile', [''])[0]
         key_str = query_args.get('keystr', [''])[0].strip().replace(',', '\n')
@@ -331,30 +346,34 @@ class DDNS(object):
                     break
             if not key:
                 self.fatal('invalid ssh key: %s', exception)
-        self.ssh_key = key
+
+        conn['key_file'] = key_file
+        conn['key'] = key
 
         # validate connection
-        ssh, ex = self.ssh_connect()
+        ssh, ex = self.ssh_connect(conn)
         if ssh:
             ssh.close()
+            return conn
         else:
             raise ex
 
-    def ssh_connect(self):
+    def ssh_connect(self, conn):
         try:
             ssh = paramiko.SSHClient()
             ssh.load_system_host_keys()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(hostname=self.ssh_host, port=self.ssh_port,
-                        username=self.ssh_user, password=self.ssh_pass,
-                        pkey=self.ssh_key, timeout=self.timeout)
+            ssh.connect(hostname=conn['host'], port=conn['port'],
+                        username=conn['user'], password=conn['pass'],
+                        pkey=conn['key'], timeout=self.timeout)
             return ssh, None
-        except Exception as ex:
+        except Exception:
             try:
                 ssh.close()
             except Exception:
                 pass
-            return None, ex
+            msg = 'ssh login failed: %(host)s,%(port)s (%(user)s)' % conn
+            return None, RuntimeError(msg)
 
     def detect_ipv6_prefix_cli(self, ssh):
         stdin, stdout, stderr = ssh.exec_command(self.PREFIX_CMD_CLI)
@@ -410,7 +429,7 @@ class DDNS(object):
         if not self.ssh_method:
             return
 
-        ssh, ex = self.ssh_connect()
+        ssh, ex = self.ssh_connect(self.ssh_conn)
         if ex:
             raise ex
 
@@ -517,9 +536,11 @@ class DDNSRequestHandler(BaseHTTPRequestHandler):
             changed = self.ddns.handle_request(host, addr, True)
             self.send_reply('good' if changed else 'nochg')
         except Exception as ex:
-            trace = traceback.format_exc()
             self.send_error('exception: %s', ex, error='911')
-            if self.ddns.verbose >= 2:
+            if isinstance(ex, RuntimeError):
+                self.ddns.error('exception: %s', ex)
+            elif self.ddns.verbose >= 2:
+                trace = traceback.format_exc()
                 self.ddns.stdlog.write(trace)
                 self.ddns.stdlog.flush()
 

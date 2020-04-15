@@ -113,6 +113,7 @@ Verbosity level: 0 = no logging, 1 = only errors, 2 = normal messages, 3 = debug
 ## Tags
 
 - `srv_dyndns_install` -- install required system packages
+- `srv_dyndns_script` -- install dyndns server executable
 - `srv_dyndns_config` -- create configuration files for dyndns
 - `srv_dyndns_service` -- setup systemd service for dyndns
 - `srv_dyndns_keyfile` -- install key file for ssh login
