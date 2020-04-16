@@ -12,6 +12,8 @@ import threading
 import _thread
 import gc
 import paramiko
+import subprocess
+import shlex
 
 from CloudFlare import CloudFlare
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -38,6 +40,7 @@ class DDNS(object):
     SLEEP_INTERVAL = 5
     RETRY_COUNT = 5
     RETRY_SLEEP = 5
+    TEST_HANDLERS = False
 
     stdlog = sys.stdout
 
@@ -118,37 +121,45 @@ class DDNS(object):
                     self.stdlog.flush()
 
     def update_once(self):
-        self.handle_request(self.main_host, '', False)
-        self.update_ipv6_prefix()
+        addr_changed, ipv4, ipv6, prefix6 = \
+            self.handle_request(self.main_host, '', False)
+        if prefix6:
+            prefix_changed = addr_changed
+        else:
+            prefix_changed, prefix6 = self.update_ipv6_prefix()
+        if addr_changed or prefix_changed:
+            self.run_command(ipv4, prefix6 or ipv6)
 
     def handle_request(self, host, addr, via_web):
-        addr4, addr6 = '', ''
+        ipv4, ipv6 = '', ''
         if ':' in addr:
-            addr6 = addr
+            ipv6 = addr
         else:
-            addr4 = addr
+            ipv4 = addr
 
         if host == self.main_host and self.proxy:
-            if not addr4:
-                addr4 = self.detect_address(ipv6=False)
-            if not addr6:
-                addr6 = self.detect_address(ipv6=True)
+            ipv4 = ipv4 or self.detect_address(ipv6=False)
+            ipv6 = ipv6 or self.detect_address(ipv6=True)
 
         if not self.cf_dns:
             self.setup_cloudflare()
 
-        ipv4_changed = self.update_host(host, addr4, ipv6=False)
-        ipv6_changed = self.update_host(host, addr6, ipv6=True)
-        addr_changed = ipv4_changed or ipv6_changed
+        ipv4_changed = self.update_host(host, ipv4, ipv6=False)
+        ipv6_changed = self.update_host(host, ipv6, ipv6=True)
+        addr_changed = ipv4_changed or ipv6_changed or self.TEST_HANDLERS
 
         if host == self.main_host and addr_changed and via_web:
-            self.update_ipv6_prefix()
+            prefix_changed, prefix6 = self.update_ipv6_prefix()
+            self.run_command(ipv4, prefix6 or ipv6)
+        else:
+            prefix6 = None
+            prefix_changed = False
 
         if via_web and self.is_service:
             self.cf_dns = None
             gc.collect()
 
-        return addr_changed
+        return addr_changed or prefix_changed, ipv4, ipv6, prefix6
 
     def setup(self):
         self.verbose = int(self.param('verbose', '0'))
@@ -174,6 +185,7 @@ class DDNS(object):
         else:
             self.main_host = ''
 
+        self.setup_command()
         self.setup_prefix_updater()
         self.setup_cloudflare()
 
@@ -281,6 +293,60 @@ class DDNS(object):
             changed = True
 
         return changed
+
+    def setup_command(self):
+        self.command = self.param('command', required=False) or ''
+        host_urls = self.param('cmd_hosts', required=False).strip()
+        if host_urls:
+            self.cmd_hosts = [self.ssh_parse_url(url.strip(), ['ssh'])
+                              for url in re.split(r'[,\s]+', host_urls)
+                              if url.strip()]
+        else:
+            self.cmd_hosts = None
+
+    def run_command(self, ipv4=None, ipv6=None):
+        cmd = self.command
+        if not cmd:
+            return
+        cmd = cmd.replace('{ipv4}', ipv4 or '127.0.0.1')
+        cmd = cmd.replace('{ipv6}', ipv6 or '::1')
+
+        if not self.cmd_hosts:
+            proc = subprocess.Popen(
+                shlex.split(cmd), close_fds=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = proc.communicate()
+            str_out = stdout.decode('utf-8', 'replace').replace('\n', ' ... ')
+            str_err = stderr.decode('utf-8', 'replace').replace('\n', ' ... ')
+            if proc.returncode or str_err:
+                self.error('cmd[local] failed: %s', str_err or '?')
+            elif str_out and self.verbose >= 2:
+                self.message('cmd[local] output: %s', str_out)
+            return
+
+        threads = [threading.Thread(target=self.remote_cmd, args=(conn, cmd))
+                   for conn in self.cmd_hosts]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    def remote_cmd(self, conn, cmd):
+        host = conn['host']
+        ssh, ex = self.ssh_connect(conn)
+        if ex:
+            self.error("cmd[%s]: ssh failed: %s", host, ex)
+            return
+        try:
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+            str_out = ' ... '.join(ln.strip() for ln in stdout.readlines())
+            str_err = ' ... '.join(ln.strip() for ln in stderr.readlines())
+            if str_err:
+                self.error('cmd[%s] failed: %s', host, str_err)
+            elif str_out and self.verbose >= 2:
+                self.message('cmd[%s] output: %s', host, str_out)
+        finally:
+            ssh.close()
 
     def setup_prefix_updater(self):
         self.prefix_len = int(self.param('prefix_len', required=False) or 0)
@@ -451,9 +517,14 @@ class DDNS(object):
             return
 
         if '/' in prefix:
+            full_prefix = prefix
             pure_prefix = prefix.split('/')[0].strip(':')
         else:
             pure_prefix = prefix.strip(':')
+            full_prefix = pure_prefix
+            if '::' not in full_prefix:
+                full_prefix += '::'
+            full_prefix += '/%s' % (self.prefix_len or 64)
         if '::' in pure_prefix:
             pure_prefix = prefix.split('::')[0].strip(':')
         prefix_parts = len(pure_prefix.split(':'))
@@ -473,6 +544,7 @@ class DDNS(object):
 
         self.message('%d of %d hosts updated for prefix %s',
                      change_count, len(self.prefix_hosts), prefix)
+        return change_count > 0, full_prefix
 
 
 class DDNSRequestHandler(BaseHTTPRequestHandler):

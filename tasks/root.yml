@@ -71,7 +71,6 @@
     ssh_url: "{{ srv_dyndns_ssh_url |default('',true) }}"
     got_keyfile: "{{ srv_dyndns_service_user and srv_dyndns_ssh_keyfile }}"
     keyfile: "{{ '~/.ssh/dyndns.key' if got_keyfile else '' }}"
-    keyfile_sep: "{{ '&' if '?' in ssh_url else '?' }}"
   notify: restart dyndns service
   tags:
     - srv_dyndns_config
