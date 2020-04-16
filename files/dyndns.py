@@ -36,6 +36,8 @@ class DDNS(object):
     PREFIX_CMD_OPENWRT = '/opt/sbin/ip -o -6 route show'
 
     SLEEP_INTERVAL = 5
+    RETRY_COUNT = 5
+    RETRY_SLEEP = 5
 
     stdlog = sys.stdout
 
@@ -214,12 +216,15 @@ class DDNS(object):
         url = 'https://%s.icanhazip.com' % ('ipv6' if ipv6 else 'ipv4')
         proxies = dict(http=self.proxy, https=self.proxy)
 
-        try:
-            resp = requests.get(url, proxies=proxies, timeout=self.timeout)
-            return resp.text.strip()
-        except RequestException as ex:
-            self.error('ip detection failed: %s', ex)
-            return ''
+        for retry in range(self.RETRY_COUNT):
+            try:
+                resp = requests.get(url, proxies=proxies, timeout=self.timeout)
+                return resp.text.strip()
+            except RequestException as ex:
+                self.error('ip probe failed (%d of %d): %s',
+                           retry + 1, self.RETRY_COUNT, ex)
+                time.sleep(self.RETRY_SLEEP)
+        return ''
 
     def setup_cloudflare(self):
         cf_email = self.param('cloudflare_email')
