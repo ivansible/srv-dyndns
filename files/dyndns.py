@@ -224,14 +224,20 @@ class DDNS(object):
     def detect_address(self, ipv6=False):
         if not self.proxy:
             return
-
-        url = 'https://%s.icanhazip.com' % ('ipv6' if ipv6 else 'ipv4')
         proxies = dict(http=self.proxy, https=self.proxy)
+
+        if ipv6:
+            fmt, url = 'text', 'http://ipv6.icanhazip.com'
+        else:
+            fmt, url = 'json', 'http://httpbin.org/ip'
 
         for retry in range(self.RETRY_COUNT):
             try:
                 resp = requests.get(url, proxies=proxies, timeout=self.timeout)
-                return resp.text.strip()
+                if fmt == 'text':
+                    return resp.text.strip()
+                else:
+                    return resp.json()['origin']
             except RequestException as ex:
                 self.error('ip probe failed (%d of %d): %s',
                            retry + 1, self.RETRY_COUNT, ex)
