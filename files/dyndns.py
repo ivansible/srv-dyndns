@@ -5,7 +5,6 @@ import sys
 import re
 import time
 import base64
-import requests
 import traceback
 import io
 import threading
@@ -18,15 +17,27 @@ import shlex
 from CloudFlare import CloudFlare
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from requests.exceptions import RequestException
+
+PROBE_SCRIPT = """#!/bin/sh
+#set -x
+PATH=/opt/sbin:/opt/bin
+prefix_len=%s
+prefix_dev=%s
+[ -f /opt/etc/net/config ] && . /opt/etc/net/config
+ipv4=$(curl -4sk https://ipv4.icanhazip.com)
+ipv6=$(curl -6sk https://ipv6.icanhazip.com)
+pfx6=$(ip -o -6 route show |
+        grep -Ev '^ff00|^fe80' |
+        grep "dev ${prefix_dev}" |
+        awk '{print $1}' |
+        grep ":/${prefix_len}" |
+        head -1)
+echo "ipv4=$ipv4 ipv6=$ipv6 pfx6=$pfx6"
+"""
 
 
 class DDNS(object):
 
-    SSH_METHODS = {
-        'ssh-cli': 'cli',
-        'ssh-openwrt': 'openwrt',
-    }
     SSH_KEY_TYPES = (
         paramiko.ed25519key.Ed25519Key,
         paramiko.ecdsakey.ECDSAKey,
@@ -34,12 +45,8 @@ class DDNS(object):
         paramiko.rsakey.RSAKey,
     )
 
-    PREFIX_CMD_CLI = 'show ipv6 prefix'
-    PREFIX_CMD_OPENWRT = '/opt/sbin/ip -o -6 route show'
-
-    SLEEP_INTERVAL = 5
-    RETRY_COUNT = 5
-    RETRY_SLEEP = 5
+    RETRY_COUNT = 6
+    RETRY_SLEEP = 15
     TEST_HANDLERS = False
 
     stdlog = sys.stdout
@@ -100,7 +107,7 @@ class DDNS(object):
             return
 
         self.poll_active = True
-        time.sleep(0.1)
+        time.sleep(0.5)
         while self.poll_active:
             try:
                 self.message('next poll')
@@ -121,45 +128,47 @@ class DDNS(object):
                     self.stdlog.flush()
 
     def update_once(self):
-        addr_changed, ipv4, ipv6, prefix6 = \
+        ipv4, ipv6, pfx6, changed = \
             self.handle_request(self.main_host, '', False)
-        if prefix6:
-            prefix_changed = addr_changed
+        if ipv4 and ipv6 and pfx6:
+            probe_changed = False
         else:
-            prefix_changed, prefix6 = self.update_ipv6_prefix()
-        if addr_changed or prefix_changed:
-            self.run_command(ipv4, prefix6 or ipv6)
+            ipv4, ipv6, pfx6, probe_changed = self.probe_addr()
+        if changed or probe_changed:
+            self.run_command(ipv4, pfx6 or ipv6)
+        self.message('ipv4 %s ipv6 %s prefix6 %s',
+                     ipv4, ipv6, pfx6, verbose=3)
 
     def handle_request(self, host, addr, via_web):
+        if not self.cf_dns:
+            self.setup_cloudflare()
+
+        pfx6, pfx_changed = None, False
         ipv4, ipv6 = '', ''
+
         if ':' in addr:
             ipv6 = addr
         else:
             ipv4 = addr
 
-        if host == self.main_host and self.proxy:
-            ipv4 = ipv4 or self.detect_address(ipv6=False)
-            ipv6 = ipv6 or self.detect_address(ipv6=True)
-
-        if not self.cf_dns:
-            self.setup_cloudflare()
+        if host == self.main_host:
+            ipv4_probe, ipv6_probe, pfx6, pfx_changed = self.probe_addr()
+            ipv4 = ipv4 or ipv4_probe
+            ipv6 = ipv6 or ipv6_probe
 
         ipv4_changed = self.update_host(host, ipv4, ipv6=False)
         ipv6_changed = self.update_host(host, ipv6, ipv6=True)
-        addr_changed = ipv4_changed or ipv6_changed or self.TEST_HANDLERS
+        changed = (ipv4_changed or ipv6_changed or pfx_changed
+                   or self.TEST_HANDLERS)
 
-        if host == self.main_host and addr_changed and via_web:
-            prefix_changed, prefix6 = self.update_ipv6_prefix()
-            self.run_command(ipv4, prefix6 or ipv6)
-        else:
-            prefix6 = None
-            prefix_changed = False
+        if host == self.main_host and changed and via_web:
+            self.run_command(ipv4, pfx6 or ipv6)
 
         if via_web and self.is_service:
             self.cf_dns = None
             gc.collect()
 
-        return addr_changed or prefix_changed, ipv4, ipv6, prefix6
+        return (ipv4, ipv6, pfx6, changed)
 
     def setup(self):
         self.verbose = int(self.param('verbose', '0'))
@@ -175,7 +184,6 @@ class DDNS(object):
         self.timeout = int(self.param('timeout', 5))
 
         self.domain = self.param('domain').strip('.')
-        self.proxy = self.param('main_proxy', required=False)
 
         hostname = self.param('main_host', required=False)
         if '.' in hostname:
@@ -186,7 +194,7 @@ class DDNS(object):
             self.main_host = ''
 
         self.setup_command()
-        self.setup_prefix_updater()
+        self.setup_prober()
         self.setup_cloudflare()
 
     def message(self, format, *args, **kwargs):
@@ -220,29 +228,6 @@ class DDNS(object):
         if required and not value:
             self.fatal('missing variable: %s', name)
         return value
-
-    def detect_address(self, ipv6=False):
-        if not self.proxy:
-            return
-        proxies = dict(http=self.proxy, https=self.proxy)
-
-        if ipv6:
-            fmt, url = 'text', 'http://ipv6.icanhazip.com'
-        else:
-            fmt, url = 'json', 'http://httpbin.org/ip'
-
-        for retry in range(self.RETRY_COUNT):
-            try:
-                resp = requests.get(url, proxies=proxies, timeout=self.timeout)
-                if fmt == 'text':
-                    return resp.text.strip()
-                else:
-                    return resp.json()['origin']
-            except RequestException as ex:
-                self.error('ip probe failed (%d of %d): %s',
-                           retry + 1, self.RETRY_COUNT, ex)
-                time.sleep(self.RETRY_SLEEP)
-        return ''
 
     def setup_cloudflare(self):
         cf_email = self.param('cloudflare_email')
@@ -304,7 +289,7 @@ class DDNS(object):
         self.command = self.param('command', required=False) or ''
         host_urls = self.param('cmd_hosts', required=False).strip()
         if host_urls:
-            self.cmd_hosts = [self.ssh_parse_url(url.strip(), ['ssh'])
+            self.cmd_hosts = [self.ssh_parse_url(url.strip())
                               for url in re.split(r'[,\s]+', host_urls)
                               if url.strip()]
         else:
@@ -339,22 +324,20 @@ class DDNS(object):
 
     def remote_cmd(self, conn, cmd):
         host = conn['host']
-        ssh, ex = self.ssh_connect(conn)
-        if ex:
-            self.error("cmd[%s]: ssh failed: %s", host, ex)
-            return
         try:
-            stdin, stdout, stderr = ssh.exec_command(cmd)
-            str_out = ' ... '.join(ln.strip() for ln in stdout.readlines())
-            str_err = ' ... '.join(ln.strip() for ln in stderr.readlines())
-            if str_err:
-                self.error('cmd[%s] failed: %s', host, str_err)
-            elif str_out and self.verbose >= 2:
-                self.message('cmd[%s] output: %s', host, str_out)
-        finally:
-            ssh.close()
+            strout, strerr = self.exec_command(conn, cmd)
+            if strerr:
+                self.error('cmd[%s] failed: %s', host, strerr)
+            elif strout and self.verbose >= 2:
+                self.message('cmd[%s] output: %s', host, strout)
+        except RuntimeError as e:
+            self.error("cmd[%s]: ssh failed: %s", host, e)
+            return
 
-    def setup_prefix_updater(self):
+    def setup_prober(self):
+        url = self.param('ssh_url', required=False)
+        self.ssh_conn = self.ssh_parse_url(url) if url else None
+
         self.prefix_len = int(self.param('prefix_len', required=False) or 0)
         self.prefix_interface = self.param('prefix_interface', required=False)
 
@@ -376,14 +359,6 @@ class DDNS(object):
                 self.prefix_hosts.append((host, addr.strip(':')))
             else:
                 self.fatal('invalid prefix hosts: %s', prefix_hosts)
-
-        url = self.param('ssh_url', required=False)
-        if url:
-            self.ssh_conn = self.ssh_parse_url(url, self.SSH_METHODS.keys())
-            self.ssh_method = self.SSH_METHODS[self.ssh_conn['scheme']]
-        else:
-            self.ssh_conn = None
-            self.ssh_method = None
 
     def ssh_parse_url(self, url, schemes=None):
         parsed_url = urlparse(url)
@@ -428,99 +403,56 @@ class DDNS(object):
         conn['key'] = key
 
         # validate connection
-        ssh, ex = self.ssh_connect(conn)
-        if ssh:
-            ssh.close()
-            return conn
-        else:
-            raise ex
+        ssh = self.ssh_connect(conn)
+        ssh.close()
+        return conn
 
     def ssh_connect(self, conn):
-        try:
-            ssh = paramiko.SSHClient()
-            ssh.load_system_host_keys()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(hostname=conn['host'], port=conn['port'],
-                        username=conn['user'], password=conn['pass'],
-                        pkey=conn['key'], timeout=self.timeout)
-            return ssh, None
-        except Exception:
+        msg = '%(host)s,%(port)s (%(user)s)' % conn
+        for retry in range(self.RETRY_COUNT):
+            if retry > 0:
+                self.error('retry ssh login: %s', msg)
             try:
-                ssh.close()
+                ssh = paramiko.SSHClient()
+                ssh.load_system_host_keys()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(hostname=conn['host'], port=conn['port'],
+                            username=conn['user'], password=conn['pass'],
+                            pkey=conn['key'], timeout=self.timeout)
+                return ssh
             except Exception:
-                pass
-            msg = 'ssh login failed: %(host)s,%(port)s (%(user)s)' % conn
-            return None, RuntimeError(msg)
+                try:
+                    ssh.close()
+                except Exception:
+                    pass
+            time.sleep(self.RETRY_SLEEP)
+        raise RuntimeError('ssh login failed: %s' % msg)
 
-    def detect_ipv6_prefix_cli(self, ssh):
-        stdin, stdout, stderr = ssh.exec_command(self.PREFIX_CMD_CLI)
-
-        prefix = ''
-        ending = '/%d' % self.prefix_len if self.prefix_len else ''
-
-        for line in list(stdout.readlines()):
-            tokens = line.strip().split(' ')
-            if len(tokens) != 2:
-                continue
-            key, val = tokens
-            key = key.strip(':').lower()
-            if not (key and val):
-                continue
-
-            if key == 'prefix':
-                if ending and not val.endswith(ending):
-                    continue
-                prefix = val
-                if not self.prefix_interface:
-                    break
-            elif key == 'interface':
-                if self.prefix_interface and val == self.prefix_interface:
-                    if prefix:
-                        break
-                    else:
-                        prefix = val
-
-        return prefix
-
-    def detect_ipv6_prefix_openwrt(self, ssh):
-        stdin, stdout, stderr = ssh.exec_command(self.PREFIX_CMD_OPENWRT)
-        ending = '/%d' % self.prefix_len if self.prefix_len else ''
-
-        for line in list(stdout.readlines()):
-            tokens = [t.lower().strip() for t in line.strip().split()]
-            if len(tokens) < 3:
-                continue
-            if tokens[0].startswith(('ff', 'fe')):
-                continue
-            if ending and not tokens[0].endswith(ending):
-                continue
-            if tokens[1] != 'dev':
-                continue
-            if self.prefix_interface and tokens[2] != self.prefix_interface:
-                continue
-            return tokens[0]
-
-        return ''
-
-    def update_ipv6_prefix(self):
-        if not self.ssh_method:
-            return
-
-        ssh, ex = self.ssh_connect(self.ssh_conn)
-        if ex:
-            raise ex
-
-        prefix = ''
+    def exec_command(self, conn, cmd):
+        ssh = None
         try:
-            if self.ssh_method == 'cli':
-                prefix = self.detect_ipv6_prefix_cli(ssh)
-            elif self.ssh_method == 'openwrt':
-                prefix = self.detect_ipv6_prefix_openwrt(ssh)
+            ssh = self.ssh_connect(conn)
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+            strout = ' ... '.join(ln.strip() for ln in stdout.readlines())
+            strerr = ' ... '.join(ln.strip() for ln in stderr.readlines())
+            cmd_msg = cmd.replace('\n', ' ... ')
+            self.message("ssh: host '%s' cmd '%s' stdout '%s' stderr '%s'",
+                         conn['host'], cmd_msg, strout, strerr, verbose=3)
+            return strout, strerr
         finally:
-            ssh.close()
-        if not prefix:
-            self.error('cannot detect prefix')
-            return
+            if ssh:
+                ssh.close()
+
+    def probe_addr(self):
+        cmd = PROBE_SCRIPT % (self.prefix_len, self.prefix_interface)
+        strout, strerr = self.exec_command(self.ssh_conn, cmd)
+        match = re.match(
+            r'^ipv4=([0-9.]+) ipv6=([0-9a-f:]+) pfx6=([0-9a-f:/]+)$',
+            strout)
+        if not match:
+            self.error('address probe failed: %s', strerr)
+            return None, None, None, False
+        ipv4, ipv6, prefix = match.group(1), match.group(2), match.group(3)
 
         if '/' in prefix:
             full_prefix = prefix
@@ -550,7 +482,7 @@ class DDNS(object):
 
         self.message('%d of %d hosts updated for prefix %s',
                      change_count, len(self.prefix_hosts), prefix)
-        return change_count > 0, full_prefix
+        return (ipv4, ipv6, full_prefix, change_count > 0)
 
 
 class DDNSRequestHandler(BaseHTTPRequestHandler):

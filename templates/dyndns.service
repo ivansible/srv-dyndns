@@ -4,11 +4,11 @@
 Description=dyndns
 After=network.target
 {% if ansible_lsb.codename == 'xenial' %}
-StartLimitInterval=180
+StartLimitInterval={{ srv_dyndns_restart_interval }}
 {% else %}
-StartLimitIntervalSec=180
+StartLimitIntervalSec={{ srv_dyndns_restart_interval }}
 {% endif %}
-StartLimitBurst=6
+StartLimitBurst={{ srv_dyndns_restart_limit }}
 
 [Service]
 Type=simple

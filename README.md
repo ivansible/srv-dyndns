@@ -63,21 +63,16 @@ external IPv4/IPv6 device addresses using socks method and device's IPv6 prefix
 using internal SSH login. Turn this off if you don't have access to internal
 device services.
 
-    srv_dyndns_main_proxy: socks5://127.0.0.1:1080
     srv_dyndns_main_host: myhost
 If host name from web request is equal to the main host, the service will
-connect to `icanhazip.com` via given http/socks proxy on internal device address
-to detect the real external addresses.
+remotely run `curl` via ssh on the host to probe for real IPv4/IPv6 address
+using the `icanhazip.com` web service.
 
-    srv_dyndns_ssh_url: ssh-cli://admin:supersecret@127.0.0.1:22
-    srv_dyndns_ssh_url: ssh-openwrt://root[:password]@127.0.0.1:2222[?keyfile=~/.ssh/private.key]
-Non-empty setting activates IPv6 prefix detection via SSH login into router.
-Supported connection schemes: `ssh-cli` and `ssh-openwrt`.
-The former connection type will connect to Keenetic CLI using SSH username
-and required password, then sends CLI command `show ipv6 prefix`.
-The latter will connect to OpenWRT/Entware firware of Keenetic using SSH
+    srv_dyndns_ssh_url: ssh://root[:password]@127.0.0.1:2222[?keyfile=~/.ssh/private.key]
+Non-empty setting activates IPv6 prefix probing via SSH login into router.
+It will connect to OpenWRT/Entware firware of Keenetic using SSH
 by using either optional password or private key from the URL query,
-then sends OpenWRT command `/opt/sbin/ip -o -6 route show`.
+then send OpenWRT command `/opt/sbin/ip -o -6 route show`.
 Listed prefixes can be further narrowed by length/interface filters.
 The first available (or passed by filters) prefix is used to update
 IPv6 addresses of prefix hosts.
