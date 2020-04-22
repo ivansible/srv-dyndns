@@ -26,8 +26,9 @@ srv_dyndns_ssh_url: ssh://admin:supersecret@127.0.0.1:22
 srv_dyndns_ssh_keyfile: ~
 
 srv_dyndns_service_user: ~
-srv_dyndns_command: ~
-srv_dyndns_cmd_hosts: ~
+srv_dyndns_main_cmd: ~
+srv_dyndns_node_cmd: ~
+srv_dyndns_node_hosts: ~
 
 srv_dyndns_prefix_hosts:
   host1: 2001:db8::1

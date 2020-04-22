@@ -77,14 +77,24 @@ Listed prefixes can be further narrowed by length/interface filters.
 The first available (or passed by filters) prefix is used to update
 IPv6 addresses of prefix hosts.
 
+    srv_dyndns_main_cmd: ~
+If `main_cmd` is not empty, the service will perform ssh login
+into `ssh_url` upon address changes and invoke this command.
+
+    srv_dyndns_node_cmd: ~
+    srv_dyndns_node_hosts: ~
+The `node_hosts` is an optional list of ssh URLs like the main `ssh_url`
+and `node_cmd` is similar to `main_cmd`, but will be invoked on the given
+list of hosts.
+
     srv_dyndns_service_user: ~
 If user is defined, dyndns service will run as this unix user.
 By default, service runs as user `nobody`.
 
     srv_dyndns_ssh_keyfile: ~
-If keyfile is defined, the given ssh key will be installed in the `.ssh`
-subdirectory of the user home directory and the `keyfile=...` clause will
-be added in the ssh url.
+If `keyfile` is defined, the given ssh key will be installed in
+the `.ssh` subdirectory of the service user's home directory and
+the `keyfile=...` clause will be added in the ssh url.
 
     srv_dyndns_prefix_len: 0|64|56
 By default (or when this setting is zero) the first available IPv6 prefix is used.
@@ -102,7 +112,8 @@ Values are concatenated with IPv6 prefix and the resulting IPv6 addresses are
 registered in DNS.
 
     srv_dyndns_verbose: 2
-Verbosity level: 0 = no logging, 1 = only errors, 2 = normal messages, 3 = debugging.
+Verbosity level:
+0 = no logging, 1 = only errors, 2 = normal messages, 3 = debugging, 4 = debug api calls.
 
 
 ## Tags

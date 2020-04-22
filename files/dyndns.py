@@ -135,7 +135,7 @@ class DDNS(object):
         else:
             ipv4, ipv6, pfx6, probe_changed = self.probe_addr()
         if changed or probe_changed:
-            self.run_command(ipv4, pfx6 or ipv6)
+            self.run_commands(ipv4, pfx6 or ipv6)
         self.message('ipv4 %s ipv6 %s prefix6 %s',
                      ipv4, ipv6, pfx6, verbose=3)
 
@@ -162,7 +162,7 @@ class DDNS(object):
                    or self.TEST_HANDLERS)
 
         if host == self.main_host and changed and via_web:
-            self.run_command(ipv4, pfx6 or ipv6)
+            self.run_commands(ipv4, pfx6 or ipv6)
 
         if via_web and self.is_service:
             self.cf_dns = None
@@ -193,7 +193,7 @@ class DDNS(object):
         else:
             self.main_host = ''
 
-        self.setup_command()
+        self.setup_commands()
         self.setup_prober()
         self.setup_cloudflare()
 
@@ -232,7 +232,7 @@ class DDNS(object):
     def setup_cloudflare(self):
         cf_email = self.param('cloudflare_email')
         cf_token = self.param('cloudflare_token')
-        cf_debug = self.verbose >= 3
+        cf_debug = self.verbose >= 4
         cf = CloudFlare(email=cf_email, token=cf_token, debug=cf_debug)
 
         zones = cf.zones.get(params=dict(name=self.domain, per_page=1))
@@ -285,24 +285,28 @@ class DDNS(object):
 
         return changed
 
-    def setup_command(self):
-        self.command = self.param('command', required=False) or ''
-        host_urls = self.param('cmd_hosts', required=False).strip()
-        if host_urls:
-            self.cmd_hosts = [self.ssh_parse_url(url.strip())
-                              for url in re.split(r'[,\s]+', host_urls)
-                              if url.strip()]
+    def setup_commands(self):
+        node_hosts = self.param('node_hosts', required=False).strip()
+        if node_hosts:
+            self.node_hosts = [self.ssh_parse_url(url.strip())
+                               for url in re.split(r'[,\s]+', node_hosts)
+                               if url.strip()]
         else:
-            self.cmd_hosts = None
+            self.node_hosts = None
+        self.node_cmd = self.param('node_cmd', required=False).strip()
+        self.main_cmd = self.param('main_cmd', required=False).strip()
 
-    def run_command(self, ipv4=None, ipv6=None):
-        cmd = self.command
+    def run_commands(self, ipv4=None, ipv6=None):
+        self._run_cmd('node_cmd', self.node_cmd, self.node_hosts, ipv4, ipv6)
+        self._run_cmd('main_cmd', self.main_cmd, [self.ssh_conn], ipv4, ipv6)
+
+    def _run_cmd(self, name, cmd, hosts, ipv4, ipv6):
         if not cmd:
             return
         cmd = cmd.replace('{ipv4}', ipv4 or '127.0.0.1')
         cmd = cmd.replace('{ipv6}', ipv6 or '::1')
 
-        if not self.cmd_hosts:
+        if not hosts:
             proc = subprocess.Popen(
                 shlex.split(cmd), close_fds=True,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -310,28 +314,29 @@ class DDNS(object):
             str_out = stdout.decode('utf-8', 'replace').replace('\n', ' ... ')
             str_err = stderr.decode('utf-8', 'replace').replace('\n', ' ... ')
             if proc.returncode or str_err:
-                self.error('cmd[local] failed: %s', str_err or '?')
+                self.error('%s[local] failed: %s', name, str_err or '?')
             elif str_out and self.verbose >= 2:
-                self.message('cmd[local] output: %s', str_out)
+                self.message('%s[local] output: %s', name, str_out)
             return
 
-        threads = [threading.Thread(target=self.remote_cmd, args=(conn, cmd))
-                   for conn in self.cmd_hosts]
+        threads = [threading.Thread(target=self._remote_cmd,
+                                    args=(conn, cmd, name))
+                   for conn in hosts]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
 
-    def remote_cmd(self, conn, cmd):
+    def _remote_cmd(self, conn, cmd, name):
         host = conn['host']
         try:
             strout, strerr = self.exec_command(conn, cmd)
             if strerr:
-                self.error('cmd[%s] failed: %s', host, strerr)
+                self.error('%s[%s] failed: %s', name, host, strerr)
             elif strout and self.verbose >= 2:
-                self.message('cmd[%s] output: %s', host, strout)
+                self.message('%s[%s] output: %s', name, host, strout)
         except RuntimeError as e:
-            self.error("cmd[%s]: ssh failed: %s", host, e)
+            self.error("%s[%s]: ssh failed: %s", name, host, e)
             return
 
     def setup_prober(self):
