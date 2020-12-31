@@ -18,9 +18,12 @@
   pip:
     name:
       - cloudflare
-      - pysocks > 1.6
+      - pysocks {{ xenial |ternary('','>1.6') }}
       - paramiko > 2.3
+      - cryptography {{ xenial |ternary('==2.9','') }}
     executable: pip3
+  vars:
+    xenial: "{{ ansible_lsb.codename == 'xenial' }}"
   register: dyndns_pip_result
   until: dyndns_pip_result is successful
   tags: srv_dyndns_install
