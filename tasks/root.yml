@@ -9,6 +9,7 @@
       - python3-setuptools
       - python3-pyasn1
       - python3-yaml
+      - python3-cffi
       ## packages required by paramiko for building pynacl
       - libffi-dev
       - libssl-dev
@@ -26,6 +27,9 @@
     xenial: "{{ ansible_lsb.codename == 'xenial' }}"
   register: dyndns_pip_result
   until: dyndns_pip_result is successful
+  retries: 29
+  delay: 10
+  throttle: 1
   tags: srv_dyndns_install
 
 - name: install dyndns server executable
@@ -101,6 +105,7 @@
   file:
     path: /etc/nginx/mixin.d
     state: directory
+    mode: 0755
   tags: srv_dyndns_nginx
 
 - name: configure nginx redirector for dyndns
