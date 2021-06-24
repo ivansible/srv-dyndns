@@ -26,12 +26,8 @@ prefix_dev=%s
 [ -f /opt/etc/net/config ] && . /opt/etc/net/config
 ipv4=$(curl -4sk https://ipv4.icanhazip.com)
 ipv6=$(curl -6sk https://ipv6.icanhazip.com)
-pfx6=$(ip -o -6 route show |
-        grep -Ev '^ff00|^fe80' |
-        grep "dev ${prefix_dev}" |
-        awk '{print $1}' |
-        grep ":/${prefix_len}" |
-        head -1)
+pfx6=$(ip -o -6 route show dev ${prefix_dev} |
+       awk "/:\\/${prefix_len}/ && !/^ff00|^fe80/ {print \\$1; exit}")
 echo "ipv4=$ipv4 ipv6=$ipv6 pfx6=$pfx6"
 """
 
