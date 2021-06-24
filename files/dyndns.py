@@ -2,6 +2,8 @@
 
 import os
 import sys
+import pwd
+import grp
 import re
 import time
 import base64
@@ -13,10 +15,14 @@ import gc
 import paramiko
 import subprocess
 import shlex
+import configparser
 
 from CloudFlare import CloudFlare
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+CONFIG_FILE = "/etc/dyndns.conf"
+CONFIG_SECT = "dyndns"
 
 PROBE_SCRIPT = """#!/bin/sh
 #set -x
@@ -167,6 +173,13 @@ class DDNS(object):
         return (ipv4, ipv6, pfx6, changed)
 
     def setup(self):
+        self.config = configparser.ConfigParser()
+        config_file = os.environ.get('DYNDNS_CONFIG_FILE', CONFIG_FILE)
+        self.config.read(config_file)
+        if not self.config.has_section(CONFIG_SECT):
+            print('failed to parse config: %s' % config_file, file=sys.stderr)
+            sys.exit(1)
+
         self.verbose = int(self.param('verbose', '0'))
 
         username = self.param('web_user', 'dyndns')
@@ -193,6 +206,12 @@ class DDNS(object):
         self.setup_prober()
         self.setup_cloudflare()
 
+        # drop privileges
+        if os.getuid() == 0:
+            os.setgroups([])
+            os.setgid(grp.getgrnam('nogroup').gr_gid)
+            os.setuid(pwd.getpwnam('nobody').pw_uid)
+
     def message(self, format, *args, **kwargs):
         verbose = kwargs.pop('verbose', 2)
         if self.verbose < verbose:
@@ -218,9 +237,8 @@ class DDNS(object):
             _thread.interrupt_main()
         sys.exit(1)
 
-    def param(self, name, default='', required=True):
-        name = 'DDNS_' + name.upper()
-        value = os.environ.get(name, default)
+    def param(self, name, fallback='', required=True):
+        value = self.config.get(CONFIG_SECT, name, fallback=fallback, raw=True)
         if required and not value:
             self.fatal('missing variable: %s', name)
         return value
@@ -340,7 +358,7 @@ class DDNS(object):
         self.ssh_conn = self.ssh_parse_url(url) if url else None
 
         self.prefix_len = int(self.param('prefix_len', required=False) or 0)
-        self.prefix_interface = self.param('prefix_interface', required=False)
+        self.prefix_dev = self.param('prefix_dev', required=False)
 
         self.prefix_hosts = []
         prefix_hosts = self.param('prefix_hosts', required=False).strip()
@@ -445,7 +463,7 @@ class DDNS(object):
                 ssh.close()
 
     def probe_addr(self):
-        cmd = PROBE_SCRIPT % (self.prefix_len, self.prefix_interface)
+        cmd = PROBE_SCRIPT % (self.prefix_len, self.prefix_dev)
         strout, strerr = self.exec_command(self.ssh_conn, cmd)
         match = re.match(
             r'^ipv4=([0-9.]+) ipv6=([0-9a-f:]+) pfx6=([0-9a-f:/]+)$',

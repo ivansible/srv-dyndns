@@ -73,8 +73,10 @@
 - name: configure dyndns service
   template:
     src: dyndns.conf
-    dest: /etc/default/dyndns
+    dest: /etc/dyndns.conf
     mode: 0640
+    owner: "{{ srv_dyndns_service_user |d('root', true) }}"
+    group: sudo
   vars:
     ssh_url: "{{ srv_dyndns_ssh_url |default('',true) }}"
     got_keyfile: "{{ srv_dyndns_service_user and srv_dyndns_ssh_keyfile }}"

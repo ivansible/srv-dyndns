@@ -20,7 +20,7 @@ srv_dyndns_restart_interval: 600
 
 srv_dyndns_main_host: myhost
 srv_dyndns_prefix_len: 64
-srv_dyndns_prefix_interface: br0
+srv_dyndns_prefix_dev: br0
 
 srv_dyndns_ssh_url: ssh://admin:supersecret@127.0.0.1:22
 srv_dyndns_ssh_keyfile: ~
