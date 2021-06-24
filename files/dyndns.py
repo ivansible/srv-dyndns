@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/local/dyndns/bin/python3
 
 import os
 import sys

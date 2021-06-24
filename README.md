@@ -118,7 +118,8 @@ Verbosity level:
 
 ## Tags
 
-- `srv_dyndns_install` -- install required system packages
+- `srv_dyndns_python38` -- install python38
+- `srv_dyndns_install` -- install required packages
 - `srv_dyndns_script` -- install dyndns server executable
 - `srv_dyndns_config` -- create configuration files for dyndns
 - `srv_dyndns_service` -- setup systemd service for dyndns

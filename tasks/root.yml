@@ -1,36 +1,35 @@
 ---
-- name: install python3 apt packages for dyndns
+- name: add deadsnakes ppa on xenial
+  apt_repository:
+    repo: ppa:deadsnakes/ppa
+    filename: deadsnakes
+    mode: 0644
+  when: ansible_lsb.codename == 'xenial'
+  tags:
+    - srv_dyndns_install
+    - srv_dyndns_python38
+
+- name: install python3.8
   apt:
     name:
-      - python3-requests
-      - python3-socks
-      - python3-paramiko
-      ## packages required by cloudflare
-      - python3-setuptools
-      - python3-pyasn1
-      - python3-yaml
-      - python3-cffi
-      ## packages required by paramiko for building pynacl
-      - libffi-dev
-      - libssl-dev
-  tags: srv_dyndns_install
+      - python3.8
+      - python3.8-dev
+      - python3.8-venv
+  tags:
+    - srv_dyndns_install
+    - srv_dyndns_python38
 
-- name: install python3 pip requirements for dyndns
+- name: install pip requirements for dyndns
   pip:
     name:
       - cloudflare
-      - pysocks {{ xenial |ternary('','>1.6') }}
-      - paramiko > 2.3
-      - cryptography {{ xenial |ternary('==2.9','') }}
-    executable: pip3
-  vars:
-    xenial: "{{ ansible_lsb.codename == 'xenial' }}"
-  register: dyndns_pip_result
-  until: dyndns_pip_result is successful
-  retries: 29
-  delay: 10
-  throttle: 1
-  tags: srv_dyndns_install
+      - pysocks
+      - paramiko
+      - cryptography < 3.4
+    virtualenv: /usr/local/dyndns
+    virtualenv_command: python3.8 -m venv
+  tags:
+    - srv_dyndns_install
 
 - name: install dyndns server executable
   copy:
@@ -66,7 +65,9 @@
         group: "{{ dyndns_user.group }}"
         mode: 0600
       notify: restart dyndns service
-  when: srv_dyndns_service_user and srv_dyndns_ssh_keyfile
+  when:
+    - srv_dyndns_service_user |d('')
+    - srv_dyndns_ssh_keyfile |d('')
   tags: srv_dyndns_keyfile
 
 - name: configure dyndns service
