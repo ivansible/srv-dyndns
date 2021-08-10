@@ -16,6 +16,7 @@ import paramiko
 import subprocess
 import shlex
 import configparser
+import logging
 
 from CloudFlare import CloudFlare
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -43,12 +44,11 @@ class DDNS(object):
     SSH_KEY_TYPES = (
         paramiko.ed25519key.Ed25519Key,
         paramiko.ecdsakey.ECDSAKey,
-        # paramiko.dsskey.DSSKey,
         paramiko.rsakey.RSAKey,
     )
 
-    RETRY_COUNT = 6
-    RETRY_SLEEP = 15
+    RETRY_COUNT = 3
+    RETRY_SLEEP = 30
     TEST_HANDLERS = False
 
     stdlog = sys.stdout
@@ -84,6 +84,9 @@ class DDNS(object):
                 sys.exit(1)
         except RuntimeError as ex:
             print('exception: %s' % ex, file=sys.stderr)
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("interrupted", file=sys.stderr)
             sys.exit(1)
 
     def web_server(self):
@@ -201,6 +204,9 @@ class DDNS(object):
             self.main_host = '%s.%s' % (hostname, self.domain)
         else:
             self.main_host = ''
+
+        # silence paramiko trace logger
+        logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
 
         self.setup_commands()
         self.setup_prober()
@@ -429,8 +435,6 @@ class DDNS(object):
     def ssh_connect(self, conn):
         msg = '%(host)s,%(port)s (%(user)s)' % conn
         for retry in range(self.RETRY_COUNT):
-            if retry > 0:
-                self.error('retry ssh login: %s', msg)
             try:
                 ssh = paramiko.SSHClient()
                 ssh.load_system_host_keys()
@@ -444,6 +448,7 @@ class DDNS(object):
                     ssh.close()
                 except Exception:
                     pass
+            self.error('retry ssh login #%d: %s', retry+1, msg)
             time.sleep(self.RETRY_SLEEP)
         raise RuntimeError('ssh login failed: %s' % msg)
 
