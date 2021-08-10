@@ -430,9 +430,10 @@ class DDNS(object):
         conn['key_file'] = key_file
         conn['key'] = key
 
-        # validate connection
-        ssh = self.ssh_connect(conn)
-        ssh.close()
+        # validate connection normally, skip validation if debugging
+        if self.verbose < 3:
+            ssh = self.ssh_connect(conn)
+            ssh.close()
         return conn
 
     def ssh_connect(self, conn):
