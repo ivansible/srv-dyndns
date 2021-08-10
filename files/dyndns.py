@@ -127,7 +127,7 @@ class DDNS(object):
                 break
             except Exception as ex:
                 self.error('exception: %s', ex)
-                if self.verbose >= 2 and not isinstance(ex, RuntimeError):
+                if (self.verbose >= 2 and not isinstance(ex, RuntimeError)) or self.verbose >= 3:
                     trace = traceback.format_exc()
                     self.stdlog.write(trace)
                     self.stdlog.flush()
@@ -580,7 +580,7 @@ class DDNSRequestHandler(BaseHTTPRequestHandler):
             self.send_error('exception: %s', ex, error='911')
             if isinstance(ex, RuntimeError):
                 self.ddns.error('exception: %s', ex)
-            elif self.ddns.verbose >= 2:
+            elif self.ddns.verbose >= 3:
                 trace = traceback.format_exc()
                 self.ddns.stdlog.write(trace)
                 self.ddns.stdlog.flush()
