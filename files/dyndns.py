@@ -25,11 +25,11 @@ from urllib.parse import urlparse, parse_qs
 CONFIG_FILE = "/etc/dyndns.conf"
 CONFIG_SECT = "dyndns"
 
-PROBE_SCRIPT = """#!/bin/sh
+PROBE_CMD = """#!/bin/sh
 #set -x
 PATH=/opt/sbin:/opt/bin
-prefix_len=%s
-prefix_dev=%s
+prefix_len=%(prefix_len)s
+prefix_dev=%(prefix_dev)s
 [ -f /opt/etc/net/config ] && . /opt/etc/net/config
 ipv4=$(curl -4sk https://ipv4.icanhazip.com)
 ipv6=$(curl -6sk https://ipv6.icanhazip.com)
@@ -385,6 +385,9 @@ class DDNS(object):
             else:
                 self.fatal('invalid prefix hosts: %s', prefix_hosts)
 
+        self.probe_cmd = self.param('probe_cmd', PROBE_CMD) % self.__dict__
+        self.message("probe cmd: [%s]", self.probe_cmd, verbose=3)
+
     def ssh_parse_url(self, url, schemes=None):
         parsed_url = urlparse(url)
         query_args = parse_qs(parsed_url.query)
@@ -468,8 +471,7 @@ class DDNS(object):
                 ssh.close()
 
     def probe_addr(self):
-        cmd = PROBE_SCRIPT % (self.prefix_len, self.prefix_dev)
-        strout, strerr = self.exec_command(self.ssh_conn, cmd)
+        strout, strerr = self.exec_command(self.ssh_conn, self.probe_cmd)
         match = re.match(
             r'^ipv4=([0-9.]+) ipv6=([0-9a-f:]+) pfx6=([0-9a-f:/]+)$',
             strout)
