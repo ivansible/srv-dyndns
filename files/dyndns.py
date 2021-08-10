@@ -30,12 +30,14 @@ PROBE_CMD = """#!/bin/sh
 PATH=/opt/sbin:/opt/bin
 prefix_len=%(prefix_len)s
 prefix_dev=%(prefix_dev)s
+provider_dev=%(provider_dev)s
 [ -f /opt/etc/net/config ] && . /opt/etc/net/config
 ipv4=$(curl -4sk https://ipv4.icanhazip.com)
 ipv6=$(curl -6sk https://ipv6.icanhazip.com)
 pfx6=$(ip -o -6 route show dev ${prefix_dev} |
        awk "/:\\/${prefix_len}/ && !/^ff00|^fe80/ {print \\$1; exit}")
-echo "ipv4=$ipv4 ipv6=$ipv6 pfx6=$pfx6"
+if4=$(ip -o -4 addr show dev ${provider_dev} | awk "{print \\$4; exit}")
+echo "ipv4=${ipv4} ipv6=${ipv6} pfx6=${pfx6} if4=${if4}"
 """
 
 
@@ -148,7 +150,13 @@ class DDNS(object):
             res, probe_changed = self.probe_addr()
         if changed or probe_changed:
             self.run_commands(res['ipv4'], res['pfx6'] or res['ipv6'])
-        self.message('ipv4 %(ipv4)s ipv6 %(ipv6)s pfx6 %(pfx6)s' % res, verbose=3)
+
+        # abbreviate NATed address for debugging
+        if not res['if4']:
+            res['if4'] = '-'
+        if res['if4'] == res['ipv4']:
+            res['if4'] = '+'
+        self.message('ipv4 %(ipv4)s ipv6 %(ipv6)s pfx6 %(pfx6)s if4 %(if4)s' % res, verbose=3)
 
     def handle_request(self, host, addr, via_web):
         pfx6, pfx_changed = None, False
@@ -158,14 +166,20 @@ class DDNS(object):
             ipv6 = addr
         else:
             ipv4 = addr
+        if4 = ipv4
 
         if host == self.main_host:
             probe, pfx_changed = self.probe_addr()
             ipv4 = ipv4 or probe['ipv4']
             ipv6 = ipv6 or probe['ipv6']
             pfx6 = probe['pfx6']
+            if4 = probe['if4']
 
-        res = dict(ipv4=ipv4, ipv6=ipv6, pfx6=pfx6)
+        res = dict(ipv4=ipv4, ipv6=ipv6, pfx6=pfx6, if4=if4)
+
+        if if4 and if4.startswith("10."):
+            self.message("ignore NATed address %s", ipv4)
+            ipv4 = '-'
 
         ipv4_changed = self.update_host(host, ipv4, ipv6=False)
         ipv6_changed = self.update_host(host, ipv6, ipv6=True)
@@ -305,11 +319,15 @@ class DDNS(object):
                              verbose=3)
                 continue
 
-            self.message('update %s as %s (%s)', host, addr, rtype)
-            self.cf_dns.put(self.zone_id, rec['id'], data=new_rec)
+            if addr != '-':
+                self.message('update %s as %s (%s)', host, addr, rtype)
+                self.cf_dns.put(self.zone_id, rec['id'], data=new_rec)
+            else:
+                self.message('delete %s as %s', host, rtype)
+                self.cf_dns.delete(self.zone_id, rec['id'])
             changed = True
 
-        if not found:
+        if not found and addr != '-':
             self.message('create %s as %s (%s)', host, addr, rtype)
             self.cf_dns.post(self.zone_id, data=new_rec)
             changed = True
@@ -334,6 +352,8 @@ class DDNS(object):
     def _run_cmd(self, name, cmd, hosts, ipv4, ipv6):
         if not cmd:
             return
+        if ipv4 == '-':
+            ipv4 = ''
         cmd = cmd.replace('{ipv4}', ipv4 or '127.0.0.1')
         cmd = cmd.replace('{ipv6}', ipv6 or '::1')
 
@@ -376,6 +396,7 @@ class DDNS(object):
 
         self.prefix_len = int(self.param('prefix_len', required=False) or 0)
         self.prefix_dev = self.param('prefix_dev', required=False)
+        self.provider_dev = self.param('provider_dev', required=False)
 
         self.prefix_hosts = []
         prefix_hosts = self.param('prefix_hosts', required=False).strip()
@@ -485,7 +506,7 @@ class DDNS(object):
     def probe_addr(self):
         strout, strerr = self.exec_command(self.ssh_conn, self.probe_cmd)
         match = re.match(
-            r'^ipv4=([0-9.]+) ipv6=([0-9a-f:]+) pfx6=([0-9a-f:/]+)$',
+            r'^ipv4=([0-9.]*) ipv6=([0-9a-f:]*) pfx6=([0-9a-f:/]*) if4=([0-9./]*)$',
             strout)
         if not match:
             self.error('address probe failed: %s', strerr)
@@ -506,6 +527,12 @@ class DDNS(object):
             pure_prefix = prefix.split('::')[0].strip(':')
         prefix_parts = len(pure_prefix.split(':'))
         probe['pfx6'] = full_prefix
+
+        # ipv4 assigned on provider interface
+        if4 = match.group(4)
+        if '/' in if4:
+            if4 = if4.split('/')[0]
+        probe['if4'] = if4
 
         change_count = 0
         for host, addr in self.prefix_hosts:
