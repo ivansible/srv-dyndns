@@ -1,0 +1,37 @@
+---
+name: dyndns-go
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+  pull_request:
+
+jobs:
+  build:
+    name: dyndns-go
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Build go-dyndns
+        run: |
+          go version
+          make -C go-src
+
+      - name: Publish go binary
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: meeDamian/github-release@1.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: >
+            go-src/dyndns
+          gzip: false
+          allow_override: true
+...
