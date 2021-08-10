@@ -153,9 +153,6 @@ class DDNS(object):
                      ipv4, ipv6, pfx6, verbose=3)
 
     def handle_request(self, host, addr, via_web):
-        if not self.cf_dns:
-            self.setup_cloudflare()
-
         pfx6, pfx_changed = None, False
         ipv4, ipv6 = '', ''
 
@@ -276,6 +273,8 @@ class DDNS(object):
     def update_host(self, host, addr, ipv6):
         if not host or not addr:
             return False
+        if not self.cf_dns:
+            self.setup_cloudflare()
 
         zone_domain = '.' + self.domain
         if not host.endswith(zone_domain):
