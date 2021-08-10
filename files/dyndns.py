@@ -47,8 +47,6 @@ class DDNS(object):
         paramiko.rsakey.RSAKey,
     )
 
-    RETRY_COUNT = 3
-    RETRY_SLEEP = 30
     TEST_HANDLERS = False
 
     stdlog = sys.stdout
@@ -113,14 +111,19 @@ class DDNS(object):
 
         self.poll_active = True
         time.sleep(0.5)
+        retry_sleep = self.retry_sleep
+        retry_count = 0
         while self.poll_active:
             try:
-                self.message('next poll')
+                if retry_count == 0:
+                    self.message('next poll')
                 self.update_once()
                 if self.is_service and self.cf_dns:
                     self.cf_dns = None
                     gc.collect()
                 time.sleep(self.poll_interval)
+                retry_sleep = self.retry_sleep
+                retry_count = 0
             except KeyboardInterrupt:
                 if self.web_active:
                     _thread.interrupt_main()
@@ -131,6 +134,11 @@ class DDNS(object):
                     trace = traceback.format_exc()
                     self.stdlog.write(trace)
                     self.stdlog.flush()
+                retry_count += 1
+                self.error("poll retry #%d sleep %dm%ds: %s",
+                           retry_count, retry_sleep // 60, retry_sleep % 60, ex)
+                time.sleep(retry_sleep)
+                retry_sleep = min(retry_sleep * self.retry_expon, self.poll_interval)
 
     def update_once(self):
         ipv4, ipv6, pfx6, changed = \
@@ -192,6 +200,9 @@ class DDNS(object):
 
         self.web_path = self.param('web_path', '/dyndns').rstrip('/')
 
+        self.retry_sleep = int(self.param('retry_sleep', 30))
+        self.retry_count = int(self.param('retry_count', 3))
+        self.retry_expon = int(self.param('retry_expon', 2))
         self.poll_interval = int(self.param('poll_interval', 3600))
         self.timeout = int(self.param('timeout', 5))
 
@@ -438,7 +449,7 @@ class DDNS(object):
 
     def ssh_connect(self, conn):
         msg = '%(host)s,%(port)s (%(user)s)' % conn
-        for retry in range(self.RETRY_COUNT):
+        for retry in range(self.retry_count):
             try:
                 ssh = paramiko.SSHClient()
                 ssh.load_system_host_keys()
@@ -453,7 +464,7 @@ class DDNS(object):
                 except Exception:
                     pass
             self.error('retry ssh login #%d: %s', retry+1, msg)
-            time.sleep(self.RETRY_SLEEP)
+            time.sleep(self.retry_sleep)
         raise RuntimeError('ssh login failed: %s' % msg)
 
     def exec_command(self, conn, cmd):
