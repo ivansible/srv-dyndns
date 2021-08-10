@@ -141,16 +141,14 @@ class DDNS(object):
                 retry_sleep = min(retry_sleep * self.retry_expon, self.poll_interval)
 
     def update_once(self):
-        ipv4, ipv6, pfx6, changed = \
-            self.handle_request(self.main_host, '', False)
-        if ipv4 and ipv6 and pfx6:
+        res, changed = self.handle_request(self.main_host, '', False)
+        if res['ipv4'] and res['ipv6'] and res['pfx6']:
             probe_changed = False
         else:
-            ipv4, ipv6, pfx6, probe_changed = self.probe_addr()
+            res, probe_changed = self.probe_addr()
         if changed or probe_changed:
-            self.run_commands(ipv4, pfx6 or ipv6)
-        self.message('ipv4 %s ipv6 %s prefix6 %s',
-                     ipv4, ipv6, pfx6, verbose=3)
+            self.run_commands(res['ipv4'], res['pfx6'] or res['ipv6'])
+        self.message('ipv4 %(ipv4)s ipv6 %(ipv6)s pfx6 %(pfx6)s' % res, verbose=3)
 
     def handle_request(self, host, addr, via_web):
         pfx6, pfx_changed = None, False
@@ -162,9 +160,12 @@ class DDNS(object):
             ipv4 = addr
 
         if host == self.main_host:
-            ipv4_probe, ipv6_probe, pfx6, pfx_changed = self.probe_addr()
-            ipv4 = ipv4 or ipv4_probe
-            ipv6 = ipv6 or ipv6_probe
+            probe, pfx_changed = self.probe_addr()
+            ipv4 = ipv4 or probe['ipv4']
+            ipv6 = ipv6 or probe['ipv6']
+            pfx6 = probe['pfx6']
+
+        res = dict(ipv4=ipv4, ipv6=ipv6, pfx6=pfx6)
 
         ipv4_changed = self.update_host(host, ipv4, ipv6=False)
         ipv6_changed = self.update_host(host, ipv6, ipv6=True)
@@ -178,7 +179,7 @@ class DDNS(object):
             self.cf_dns = None
             gc.collect()
 
-        return (ipv4, ipv6, pfx6, changed)
+        return res, changed
 
     def setup(self):
         self.config = configparser.ConfigParser()
@@ -488,9 +489,10 @@ class DDNS(object):
             strout)
         if not match:
             self.error('address probe failed: %s', strerr)
-            return None, None, None, False
-        ipv4, ipv6, prefix = match.group(1), match.group(2), match.group(3)
+            return None, None
+        probe = dict(ipv4=match.group(1), ipv6=match.group(2))
 
+        prefix = match.group(3)
         if '/' in prefix:
             full_prefix = prefix
             pure_prefix = prefix.split('/')[0].strip(':')
@@ -503,6 +505,7 @@ class DDNS(object):
         if '::' in pure_prefix:
             pure_prefix = prefix.split('::')[0].strip(':')
         prefix_parts = len(pure_prefix.split(':'))
+        probe['pfx6'] = full_prefix
 
         change_count = 0
         for host, addr in self.prefix_hosts:
@@ -519,7 +522,7 @@ class DDNS(object):
 
         self.message('%d of %d hosts updated for prefix %s',
                      change_count, len(self.prefix_hosts), prefix)
-        return (ipv4, ipv6, full_prefix, change_count > 0)
+        return probe, change_count > 0
 
 
 class DDNSRequestHandler(BaseHTTPRequestHandler):
@@ -585,7 +588,7 @@ class DDNSRequestHandler(BaseHTTPRequestHandler):
 
         try:
             self.ddns.message('web request from %s', addr)
-            changed = self.ddns.handle_request(host, addr, True)
+            res, changed = self.ddns.handle_request(host, addr, True)
             self.send_reply('good' if changed else 'nochg')
         except Exception as ex:
             self.send_error('exception: %s', ex, error='911')
