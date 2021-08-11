@@ -1,5 +1,5 @@
 ---
-name: test
+name: molecule
 
 # yamllint disable-line rule:truthy
 on:
@@ -59,7 +59,7 @@ jobs:
         if: ${{ matrix.os != 'ubuntu-16.04' }}
         run: |
           # upgrade pip, remove incompatible pyYAML
-          sudo apt-get remove -qy python3-yaml
+          sudo apt-get remove -qy python3-yaml python3-pexpect
           sudo -H pip3 install -U pip setuptools wheel
           # screw you cryptography! why require rust??
           sudo -H pip3 install "cryptography<3.4"
