@@ -2,6 +2,7 @@
 # defaults for ivansible.srv_dyndns
 
 srv_dyndns_enable: true
+srv_dyndns_python: false
 
 srv_dyndns_cloudflare_email: ~
 srv_dyndns_cloudflare_token: ~

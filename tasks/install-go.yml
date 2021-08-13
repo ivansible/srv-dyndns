@@ -1,0 +1,20 @@
+---
+- name: detect latest dyndns-go release
+  github_release:
+    repository: ivansible/srv-dyndns
+    release: latest
+    template: '{download_url}/dyndns'
+  tags: skip_ansible_lint
+  register: latest_dyndns_release
+  changed_when: false
+
+- name: download and install dyndns go binary
+  get_url:
+    url: "{{ latest_dyndns_release.url }}"
+    dest: /usr/local/sbin/dyndns
+    owner: root
+    group: root
+    mode: 0755
+    force: true
+  notify: restart dyndns service
+...

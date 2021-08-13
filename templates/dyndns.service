@@ -14,7 +14,8 @@ StartLimitBurst={{ srv_dyndns_restart_limit }}
 Type=simple
 User={{ srv_dyndns_service_user |d('root', true) }}
 Group=nogroup
-ExecStart=/usr/local/sbin/dyndns service
+ExecStart=/usr/local/sbin/dyndns{%if srv_dyndns_python |bool %} service{% endif %}
+
 Restart=always
 RestartSec=20
 PrivateTmp=true

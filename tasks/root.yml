@@ -1,47 +1,13 @@
 ---
-- name: add deadsnakes ppa on xenial
-  apt_repository:
-    repo: ppa:deadsnakes/ppa
-    filename: deadsnakes
-    mode: 0644
-  when: ansible_lsb.codename == 'xenial'
-  tags:
-    - srv_dyndns_install
-    - srv_dyndns_python38
+- name: install dyndns-python
+  import_tasks: install-python.yml
+  when: srv_dyndns_python |bool
+  tags: srv_dyndns_install
 
-- name: install python3.8
-  apt:
-    name:
-      - python3.8
-      - python3.8-dev
-      - python3.8-venv
-  tags:
-    - srv_dyndns_install
-    - srv_dyndns_python38
-
-- name: install pip requirements for dyndns
-  pip:
-    name:
-      - cloudflare
-      - pysocks
-      - paramiko
-      - cryptography < 3.4
-    virtualenv: /usr/local/dyndns
-    virtualenv_command: python3.8 -m venv
-  tags:
-    - srv_dyndns_install
-
-- name: install dyndns server executable
-  copy:
-    src: dyndns.py
-    dest: /usr/local/sbin/dyndns
-    force: true
-    mode: 0755
-  notify: restart dyndns service
-  tags:
-    - srv_dyndns_install
-    - srv_dyndns_script
-    - srv_dyndns_service
+- name: install dyndns-go
+  import_tasks: install-go.yml
+  when: not srv_dyndns_python |bool
+  tags: srv_dyndns_install
 
 - block:
     - name: detect home directory of dyndns user
