@@ -13,7 +13,11 @@ var (
 	zoneID string
 )
 
-func setupCloudflare(ctx context.Context, domain string) (err error) {
+func setupCloudflare() (err error) {
+	if api != nil && zoneID != "" {
+		return nil
+	}
+	domain := cfg.Domain
 	email := paramStr("cloudflare_email", Required)
 	token := paramStr("cloudflare_token", Required)
 	api, err = cloudflare.New(token, email)
@@ -28,7 +32,11 @@ func setupCloudflare(ctx context.Context, domain string) (err error) {
 }
 
 func updateHost(host, addr string, ipv6 bool) (bool, error) {
-	ctx := context.Background()
+	if api == nil || zoneID == "" {
+		if err := setupCloudflare(); err != nil {
+			return false, errors.Wrap(err, "cloudflare setup failed")
+		}
+	}
 
 	if host == "" || addr == "" {
 		return false, nil
@@ -60,6 +68,7 @@ func updateHost(host, addr string, ipv6 bool) (bool, error) {
 		Name: host,
 		Type: rtype,
 	}
+	ctx := context.Background()
 	records, err := api.DNSRecords(ctx, zoneID, filter)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to list zone")

@@ -9,29 +9,23 @@ import (
 	"text/template"
 )
 
-var tmplCache = map[string]*template.Template{}
-
 func expand(format string, data interface{}) (string, error) {
 	name := format
-	tmpl := tmplCache[name]
-	var err error
-	if tmpl == nil {
-		if tmpl, err = template.New(name).Parse(format); err != nil {
-			return "", err
-		}
-		tmplCache[name] = tmpl
+	tmpl, err := template.New(name).Parse(format)
+	if err != nil {
+		return "", err
 	}
 	var buf bytes.Buffer
-	if err = tmpl.Execute(&buf, data); err != nil {
+	err = tmpl.Execute(&buf, data)
+	if err != nil {
 		return "", err
 	}
 	return buf.String(), nil
 }
 
-var reEOL = regexp.MustCompile(`[ \t]*\n+[ \t]*`)
-
 func strOutput(s string) string {
 	s = strings.TrimSpace(s)
+	reEOL := regexp.MustCompile(`[ \t]*\n+[ \t]*`)
 	return reEOL.ReplaceAllLiteralString(s, " ... ")
 }
 

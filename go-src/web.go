@@ -42,8 +42,6 @@ func setupWebServer() error {
 	return err
 }
 
-var reValidIpv4 = regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}$`)
-
 func handleWebRequest(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimRight(r.URL.Path, "/")
 	if r.Method != "GET" || path != webPath {
@@ -57,6 +55,7 @@ func handleWebRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	addr := r.FormValue("myip")
+	reValidIpv4 := regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}$`)
 	if addr == "" {
 		addr = r.Header.Get("X-Real-IP")
 	}

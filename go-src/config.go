@@ -23,6 +23,9 @@ var (
 )
 
 func setupConfig() error {
+	if cfgSect != nil {
+		return nil
+	}
 	cfgPath := os.Getenv("DYNDNS_CONFIG_FILE")
 	if cfgPath == "" {
 		cfgPath = ConfigFile
@@ -35,20 +38,20 @@ func setupConfig() error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to read config: %s", cfgPath)
 	}
-	cfgSect, err = cfgFile.GetSection(ConfigSect)
+	sect, err := cfgFile.GetSection(ConfigSect)
 	if err != nil {
 		return errors.Wrapf(err, "missing config section [%s]: %s", ConfigSect, cfgPath)
 	}
-	cfgCache = make(map[string]string)
+	cfgSect = sect
 	return nil
 }
 
 func paramStr(name string, def string) string {
-	if cfgSect == nil {
-		logFatal("failed to read config value: %s", name)
-	}
 	if val, ok := cfgCache[name]; ok {
 		return val
+	}
+	if cfgSect == nil {
+		logFatal("config file not ready for value: %s", name)
 	}
 	if def != Required && !cfgSect.HasKey(name) {
 		return def

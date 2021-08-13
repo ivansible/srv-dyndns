@@ -14,13 +14,11 @@ import (
 )
 
 type sshConn struct {
-	url     string
-	host    string
-	user    string
-	pass    string
-	keyFile string
-	keyData string
-	auth    ssh.AuthMethod
+	url  string
+	host string
+	user string
+	pass string
+	key  string
 }
 
 func newSSHConn(urlStr string) (*sshConn, error) {
@@ -54,36 +52,31 @@ func newSSHConn(urlStr string) (*sshConn, error) {
 	}
 
 	q := u.Query()
-	c.keyData = strings.ReplaceAll(strings.TrimSpace(q.Get("keystr")), ",", "\n")
-	c.keyFile = strings.TrimSpace(q.Get("keyfile"))
-	if c.keyFile == "" && c.keyData == "" {
-		c.keyFile = strings.TrimSpace(q.Get("key"))
+	keyFile := strings.TrimSpace(q.Get("keyfile"))
+	c.key = strings.ReplaceAll(strings.TrimSpace(q.Get("keystr")), ",", "\n")
+	if keyFile == "" && c.key == "" {
+		keyFile = strings.TrimSpace(q.Get("key"))
 	}
 
-	if strings.HasPrefix(c.keyFile, "~") {
+	if strings.HasPrefix(keyFile, "~") {
 		homeDir := "/root"
 		if usr, err := user.Current(); err == nil {
 			homeDir = usr.HomeDir
 		}
-		c.keyFile = strings.Replace(c.keyFile, "~", homeDir, 1)
+		keyFile = strings.Replace(keyFile, "~", homeDir, 1)
 	}
-	if c.keyFile != "" {
-		keyData, err := ioutil.ReadFile(c.keyFile)
+	if keyFile != "" {
+		keyData, err := ioutil.ReadFile(keyFile)
 		if err != nil {
-			return nil, errors.Wrapf(err, "unable to read private key: %s", c.keyFile)
+			return nil, errors.Wrapf(err, "unable to read private key: %s", keyFile)
 		}
-		c.keyData = string(keyData)
+		c.key = string(keyData)
 	}
-
-	if c.auth == nil && c.keyData != "" {
-		signer, err := ssh.ParsePrivateKey([]byte(c.keyData))
+	if c.key != "" {
+		_, err := ssh.ParsePrivateKey([]byte(c.key))
 		if err != nil {
-			return nil, errors.Wrapf(err, "unable to parse private key: %q", c.keyData)
+			return nil, errors.Wrapf(err, "unable to parse private key: %q", c.key)
 		}
-		c.auth = ssh.PublicKeys(signer)
-	}
-	if c.auth == nil && c.pass != "" {
-		c.auth = ssh.Password(c.pass)
 	}
 
 	u.User = nil
@@ -93,11 +86,21 @@ func newSSHConn(urlStr string) (*sshConn, error) {
 }
 
 func (c *sshConn) connect() (*ssh.Client, error) {
+	auth := []ssh.AuthMethod{}
+	if c.key != "" {
+		signer, err := ssh.ParsePrivateKey([]byte(c.key))
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to parse private key: %q", c.key)
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+	}
+	if c.pass != "" {
+		auth = append(auth, ssh.Password(c.pass))
+	}
+
 	conf := &ssh.ClientConfig{
-		User: c.user,
-		Auth: []ssh.AuthMethod{
-			c.auth,
-		},
+		User:            c.user,
+		Auth:            auth,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         cfg.Timeout,
 	}

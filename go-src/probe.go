@@ -36,9 +36,9 @@ if4=$(ip -o -4 addr show dev ${provider_dev} | awk "{print \$4; exit}")
 echo "ipv4=${ipv4} ipv6=${ipv6} pfx6=${pfx6} if4=${if4}"
 `
 
-var reProbe = regexp.MustCompile(`^ipv4=([0-9.]*) ipv6=([0-9a-f:]*) pfx6=([0-9a-f:/]*) if4=([0-9./]*)$`)
-
 func probeAddr() (*result, bool, error) {
+	reProbe := regexp.MustCompile(`^ipv4=([0-9.]*) ipv6=([0-9a-f:]*) pfx6=([0-9a-f:/]*) if4=([0-9./]*)$`)
+
 	outStr, errStr, err := probeConn.execute(probeCmd)
 	if err != nil {
 		return nil, false, err

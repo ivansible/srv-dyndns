@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -29,6 +31,8 @@ var cfg struct {
 }
 
 func main() {
+	log.SetFlags(0)
+
 	var mode string
 	switch len(os.Args) {
 	case 1:
@@ -79,6 +83,7 @@ func main() {
 	}
 
 	if pollActive {
+		freeMem()
 		pollService()
 	}
 }
@@ -133,10 +138,12 @@ func pollService() {
 			logPrint("next poll")
 		}
 		err := updateOnce()
+
 		if cfg.TestHandlers {
 			err = errors.New("test error")
 		}
 		if err == nil {
+			freeMem()
 			logDebug("poll sleeping for %v", cfg.PollInterval)
 			time.Sleep(cfg.PollInterval)
 			retrySleep = cfg.RetrySleep
@@ -245,7 +252,7 @@ func setupAll(ctx context.Context, webActive bool) error {
 	if err := setupCommands(); err != nil {
 		return err
 	}
-	if err := setupCloudflare(ctx, cfg.Domain); err != nil {
+	if err := setupCloudflare(); err != nil {
 		return err
 	}
 
@@ -256,4 +263,10 @@ func setupAll(ctx context.Context, webActive bool) error {
 	}
 
 	return nil
+}
+
+func freeMem() {
+	api = nil
+	cfgSect = nil
+	debug.FreeOSMemory()
 }
